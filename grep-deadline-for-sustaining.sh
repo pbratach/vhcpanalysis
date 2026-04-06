@@ -1,0 +1,1 @@
+find ./$1 -name "server.log*" -type f | grep metadata.gateway | xargs -I logs grep -H  -i "deadline_" logs  |awk -F=/ '{print $2}'  |  sed -e 's/]//g' | sort | uniq -c | tee $1.mgdw-deadline-for-sustaining.txt

@@ -1,0 +1,173 @@
+#!/bin/bash
+# Author: Paul Bratach with help from CoPilot
+# Version 1.0
+#   Used awk
+#   Comma formatting inside awk
+#
+# Version 1.1
+#   Use gawk
+#   Add AvgSize and improve output headers and column widths
+#   Add version number and start, end and duration times for script
+#   Add LC_ALL and LC_NUMERIC parameters
+#
+export LC_ALL="en_US.UTF-8"
+export LC_NUMERIC="en_US.UTF-8"
+
+# Display the version of the script
+echo " "
+echo "Script version 1.1.0 (01/21/2026)"
+
+# Record the start time using the %s format (seconds since the epoch)
+START_TIME=$(date +%s)
+echo "Script started at: $(date)"
+echo " "
+
+echo "Calculating Hour, Method, Status, Count, TotalSize Bytes, AvgSize Bytes, MinTime (msec), MaxTime (msec), AvgTime (msec)"
+echo "`wc -l all-s3-gateway-istio-proxy.txt-no-downstream_remote_disconnect.txt | awk '{print $1}'` records to process, this may take some time"
+echo " "
+
+gawk '
+
+###############################################################################
+# Utility Functions
+###############################################################################
+
+# Format numbers with commas, but only if integer part >= 100
+function comma(num,    s, neg, dot, whole, frac) {
+    num = num ""
+
+    # Find decimal point
+    dot = index(num, ".")
+    if (dot > 0) {
+        whole = substr(num, 1, dot - 1)
+        frac  = substr(num, dot)
+    } else {
+        whole = num
+        frac  = ""
+    }
+
+    # No commas for small numbers
+    if (whole + 0 < 100) return whole frac
+
+    # Handle negative
+    if (substr(whole, 1, 1) == "-") {
+        neg = 1
+        whole = substr(whole, 2)
+    }
+
+    s = ""
+    while (length(whole) > 3) {
+        s = "," substr(whole, length(whole) - 2) s
+        whole = substr(whole, 1, length(whole) - 3)
+    }
+    s = whole s
+
+    if (neg) s = "-" s
+    return s frac
+}
+
+# Safe average
+function avg(total, count) {
+    return (count > 0 ? total / count : 0)
+}
+
+###############################################################################
+# Main Parsing Loop
+###############################################################################
+
+{
+    if (NF < 12) next
+    if (substr($1,1,1) != "[") next
+
+    ts = substr($1, 2)
+    split(ts, t1, "T")
+    split(t1[2], t2, ":")
+    hour = t1[1] "T" t2[1]
+
+    method = $2
+    gsub(/"/, "", method)
+    if (method == "-") next
+
+    status = $5
+    if (status + 0 != status) next
+
+    if (method == "PUT")
+        size = $10
+    else
+        size = $11
+    if (size + 0 != size) next
+
+    tval = $12
+    if (tval + 0 != tval) next
+
+    key = hour " " method " " status
+
+    count[key]++
+    total_size[key] += size
+    total_time[key] += tval
+
+    if (!(key in min_time) || tval < min_time[key]) min_time[key] = tval
+    if (!(key in max_time) || tval > max_time[key]) max_time[key] = tval
+}
+
+###############################################################################
+# Final Output
+###############################################################################
+
+END {
+    printf "%-15s %-8s %-6s %-12s %-19s %-19s %-8s %-12s %-12s\n",
+           "Hour", "Method", "Code", "Count",
+	   "TotalSize", "AvgSize", "MinTime", "MaxTime", "AvgTime(msec)"
+
+    for (k in count) keys[++n] = k
+    asort(keys)
+
+    for (i = 1; i <= n; i++) {
+        k = keys[i]
+        split(k, p, " ")
+
+        hour    = p[1]
+        method  = p[2]
+        code    = p[3]
+
+        c       = count[k]
+        total   = total_size[k]
+        avgsize = avg(total, c)
+
+        minv    = min_time[k]
+        maxv    = max_time[k]
+        avgtime = avg(total_time[k], c)
+
+        printf "%-15s %-8s %-6s %-12d %-19s %-19s %-8d %-12s %-12s\n",
+               hour,
+               method,
+               code,
+               c,
+               comma(total),
+               comma(sprintf("%.2f", avgsize)),
+               minv,
+               comma(maxv),
+               comma(sprintf("%.2f", avgtime))
+    }
+}
+' all-s3-gateway-istio-proxy.txt-no-downstream_remote_disconnect.txt
+
+# Calculate the total duration in seconds
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+# Calculate hours, minutes, and seconds from the total duration
+HOURS=$((DURATION / 3600))
+MINUTES=$(( (DURATION % 3600) / 60 ))
+SECONDS=$((DURATION % 60))
+
+# Display the elapsed time
+echo " "
+echo "--------------------------------------------------"
+echo "Script finished at $(date)"
+echo "Total runtime: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+echo "--------------------------------------------------"
+
+unset LC_ALL
+unset LC_NUMERIC
+

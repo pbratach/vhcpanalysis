@@ -1,0 +1,37 @@
+#!/bin/bash
+# VSP1O - diagcollector/diaginspector analysis
+# Change directory to where the diaginspector output is stored
+#
+if [ -f all-s3-gateway-istio-proxy.txt ]; then
+	echo "WARNING: File all-s3-gateway-istio-proxy.txt already exists"
+fi
+echo "Counting the total number of S3 calls in istio s3 logs"
+for i in ` find . -name "*s3-gateway*istio-proxy*" -print`; do cat $i >> all-s3-gateway-istio-proxy.txt; done
+# Count the number of S3 calls in istio s3 logs
+echo "Total number of S3 calls in s3-gateway istio-proxy logs: `wc -l  all-s3-gateway-istio-proxy.txt | awk '{print $1}'`"
+# Count the number of downstream_remote_disconnect errors in istio s3 logs
+echo "Total number of downstream_remote_disconnect errors in S3 calls in s3-gateway istio-proxy logs: `grep downstream_remote_disconnect all-s3-gateway-istio-proxy.txt | wc -l`"
+# Remove the downstream_remote_disconnect errors in istio s3 logs
+grep -v downstream_remote_disconnect all-s3-gateway-istio-proxy.txt > all-s3-gateway-istio-proxy.txt-no-downstream_remote_disconnect.txt
+# Count the number of S3 calls ignoring downstream_remote_disconnect errors in istio s3 logs
+echo "Total number of S3 calls excluding downstream_remote_disconnect errors in s3-gateway istio-proxy logs: `wc -l all-s3-gateway-istio-proxy.txt-no-downstream_remote_disconnect.txt | awk '{print $1}'`"
+# Count the number of S3 status codes ignoring downstream_remote_disconnect errors
+echo " "
+echo "Breakdown of S3 Calls, Status and Size"
+echo "Count  S3 Call  S3 Status  Total Size"
+awk '{
+    method=$2;
+    sub(/^"/, "", method);
+    status=$5;
+    size=$11;
+    key=method " " status;
+    count[key]++;
+    sum[key]+=size;
+}
+END {
+    for (k in count) {
+        print count[k], k, sum[k];
+    }
+}' all-s3-gateway-istio-proxy.txt-no-downstream_remote_disconnect.txt | egrep "DELETE|GET|HEAD|POST|PUT" | sort -k 2
+# Count the number of S3 status codes ignoring downstream_remote_disconnect errors for a certain hour
+#cat all-s3-gateway-istio-proxy.txt-no-downstream_remote_disconnect.txt | tr -s " " | awk -F' ' '$1 ~ /2025-06-20T00/ {print "2025-06-20T00",$2,$5}' | sort | uniq -c | sed 's/"//' | egrep "DELETE|GET|HEAD|POST|PUT"
